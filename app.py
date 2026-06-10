@@ -39,7 +39,7 @@ h2, h3 {color: #005B8F !important; font-weight: 800 !important;}
 
 st.markdown("""
 <div class="hero">
-    <h1>Интеллектуальная аналитическая система контроля качества контакт-центра</h1>
+    <h1>Аналитическая система контроля качества контакт-центра</h1>
     <div class="hero-subtitle">Система поддержки управленческих решений для анализа претензионной деятельности</div>
     <p class="hero-text">Платформа выполняет анализ претензий пациентов, выявляет проблемные зоны, оценивает качество работы операторов, рассчитывает риск-индексы и формирует управленческие рекомендации для повышения эффективности обслуживания.</p>
 </div>
@@ -214,33 +214,84 @@ else:
 st.sidebar.markdown("## Параметры отчёта")
 with st.sidebar.expander("Реквизиты для PDF", expanded=False):
     report_author = st.text_input("Автор (ФИО)", value="")
-    report_org = st.text_input("Организация / вуз", value="ВГУ")
-    report_supervisor = st.text_input("Научный руководитель", value="")
+    report_org = st.text_input("Организация", value="")
+    report_supervisor = st.text_input("Должность", value="")
 
 st.sidebar.markdown("## Фильтры анализа")
-if st.sidebar.button("Сбросить фильтры"):
-    for key in list(st.session_state.keys()):
-        if key.startswith("f_") or key == "operator_search":
+
+# кнопка сброса фильтров
+if st.sidebar.button("Сбросить фильтры", use_container_width=True):
+    for key in [
+        "f_year",
+        "f_sv",
+        "f_month",
+        "f_week",
+        "f_day",
+        "f_city",
+        "f_region",
+        "f_operator",
+        "f_claim_topic",
+        "f_validity",
+        "operator_search"
+    ]:
+        if key in st.session_state:
             del st.session_state[key]
+
     st.rerun()
 
+
 df_filtered = df.copy()
+
 
 def natural_key(value):
     parts = re.split(r"(\d+)", str(value))
     return [int(p) if p.isdigit() else p.lower() for p in parts]
 
+
 def cascading_filter(label, column, key):
     global df_filtered
+
     if column is None or column not in df.columns:
         return
-    options = sorted([x for x in df_filtered[column].dropna().unique() if str(x) != "Не указано"], key=natural_key)
-    if key in st.session_state:
-        st.session_state[key] = [x for x in st.session_state[key] if x in options]
-    selected = st.sidebar.multiselect(label, options, key=key)
-    if selected:
-        df_filtered = df_filtered[df_filtered[column].isin(selected)]
 
+    options = sorted(
+        [
+            x for x in df_filtered[column].dropna().unique()
+            if str(x) != "Не указано"
+        ],
+        key=natural_key
+    )
+
+    # защита от старых выбранных значений
+    current_value = st.session_state.get(key, [])
+
+    if current_value:
+        current_value = [
+            x for x in current_value
+            if x in options
+        ]
+
+        st.session_state[key] = current_value
+
+    selected = st.sidebar.multiselect(
+        label,
+        options,
+        key=key
+    )
+
+    if selected:
+        selected = [
+            x for x in selected
+            if x in options
+        ]
+
+        if selected:
+            df_filtered = df_filtered[
+                df_filtered[column].isin(selected)
+            ]
+          
+# фильтры
+cascading_filter("Год", col_year, "f_year")
 cascading_filter("СВ", col_sv, "f_sv")
 cascading_filter("Месяц", "_Месяц", "f_month")
 cascading_filter("Неделя", "_Неделя", "f_week")
@@ -248,20 +299,31 @@ cascading_filter("День", "_День", "f_day")
 cascading_filter("Город", col_city, "f_city")
 cascading_filter("Агломерация", col_region, "f_region")
 
-operator_search = st.sidebar.text_input("Поиск оператора", key="operator_search")
+operator_search = st.sidebar.text_input(
+    "Поиск оператора",
+    key="operator_search"
+)
+
 if col_operator and operator_search:
-    df_filtered = df_filtered[df_filtered[col_operator].astype(str).str.contains(operator_search, case=False, na=False)]
+    df_filtered = df_filtered[
+        df_filtered[col_operator]
+        .astype(str)
+        .str.contains(operator_search, case=False, na=False)
+    ]
 
 cascading_filter("Оператор", col_operator, "f_operator")
 cascading_filter("Тематика жалобы", col_claim_topic, "f_claim_topic")
 cascading_filter("Обоснованность", col_validity, "f_validity")
 
 df = df_filtered.copy()
+
 if len(df) == 0:
-    st.warning("По выбранным фильтрам данных нет. Измените фильтры или нажмите «Сбросить фильтры».")
+    st.warning(
+        "По выбранным фильтрам данных нет. Измените фильтры или нажмите «Сбросить фильтры»."
+    )
     st.stop()
 
-st.markdown("## Dashboard руководителя")
+st.markdown("## Аналитическая панель качества обслуживания")
 total_claims = len(df)
 
 if col_validity and total_claims > 0:
@@ -275,10 +337,10 @@ else:
 
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 k1.metric("Всего претензий", total_claims)
-k2.metric("Операторов", df[col_operator].nunique() if col_operator else "—")
-k3.metric("Городов", df[col_city].nunique() if col_city else "—")
-k4.metric("СВ", df[col_sv].nunique() if col_sv else "—")
-k5.metric("Тем жалоб", df[col_claim_topic].nunique() if col_claim_topic else "—")
+k2.metric("Операторов", df[col_operator].nunique() if col_operator and col_operator in df.columns else "—")
+k3.metric("Городов", df[col_city].nunique() if col_city and col_city in df.columns else "—")
+k4.metric("СВ", df[col_sv].nunique() if col_sv and col_sv in df.columns else "—")
+k5.metric("Тем жалоб", df[col_claim_topic].nunique() if col_claim_topic and col_claim_topic in df.columns else "—")
 k6.metric("Обоснованных", f"{valid_share:.1f}%")
 k7.metric("Необоснованных", f"{invalid_share:.1f}%")
 
@@ -286,7 +348,7 @@ operator_stats = None
 risk_index = 0
 quality_index = 100
 
-if col_operator:
+if col_operator and col_operator in df.columns:
     df["_Обоснована"] = df[col_validity].apply(lambda x: 1 if x == "Обоснована" else 0) if col_validity else 0
     df["_Есть_ошибка"] = df["_Ошибка_оператора_аналитическая"].apply(lambda x: 0 if x == "Ошибки нет" else 1)
     operator_stats = df.groupby(col_operator).agg(
