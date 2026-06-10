@@ -142,11 +142,11 @@ data_source = st.radio(
 horizontal=True
 )
 df_original = None
-if data_source == "Excel-файл":
-uploaded_file = st.file_uploader(
-"Загрузите Excel-файл с претензиями",
-type=["xlsx", "xls"]
-)
+if source_type == "Excel":
+    uploaded_file = st.file_uploader(
+        "Загрузите Excel-файл",
+        type=["xlsx", "xls"]
+    )
 if uploaded_file is not None:
 df_original = pd.read_excel(uploaded_file)
 if data_source == "Google Sheets":
