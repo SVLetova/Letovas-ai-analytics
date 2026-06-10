@@ -3,6 +3,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from io import BytesIO
 from datetime import datetime
+import re
+
+# =========================================================
+# PAGE CONFIG
+# =========================================================
 
 st.set_page_config(
     page_title="Аналитическая система КЦ",
@@ -10,7 +15,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# ===================== DESIGN =====================
+# =========================================================
+# DESIGN
+# =========================================================
 
 st.markdown("""
 <style>
@@ -20,7 +27,7 @@ st.markdown("""
 }
 h1 {
     color: #0097A9 !important;
-    font-size: 44px !important;
+    font-size: 42px !important;
     font-weight: 900 !important;
 }
 h2, h3 {
@@ -37,7 +44,7 @@ h2, h3 {
 }
 .hero-subtitle {
     color: #005B8F;
-    font-size: 23px;
+    font-size: 22px;
     font-weight: 700;
 }
 .hero-text {
@@ -96,41 +103,78 @@ h2, h3 {
     border-left: 6px solid #2EAD70;
     margin-bottom: 10px;
 }
+.small-note {
+    color: #5B6B7A;
+    font-size: 14px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== HEADER =====================
+# =========================================================
+# HEADER
+# =========================================================
 
 st.markdown("""
 <div class="hero">
-    <h1>Аналитическая система контроля качества контакт-центра</h1>
+    <h1>Интеллектуальная аналитическая система контроля качества контакт-центра</h1>
     <div class="hero-subtitle">
         Система поддержки управленческих решений для анализа претензионной деятельности
     </div>
     <p class="hero-text">
-        Платформа выполняет анализ претензий, выявляет проблемные зоны,
+        Платформа выполняет анализ претензий пациентов, выявляет проблемные зоны,
         оценивает качество работы операторов, рассчитывает риск-индексы и формирует
         управленческие рекомендации для повышения эффективности обслуживания.
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader(
-    "Загрузите Excel-файл с претензиями",
-    type=["xlsx", "xls"]
+# =========================================================
+# DATA SOURCE
+# =========================================================
+
+st.markdown("### Источник данных")
+
+data_source = st.radio(
+    "Выберите источник данных",
+    ["Excel-файл", "Google Sheets"],
+    horizontal=True
 )
 
-if uploaded_file is None:
-    st.info("Загрузите Excel-файл для запуска аналитического модуля.")
+df_original = None
+
+if data_source == "Excel-файл":
+    uploaded_file = st.file_uploader(
+        "Загрузите Excel-файл с претензиями",
+        type=["xlsx", "xls"]
+    )
+    if uploaded_file is not None:
+        df_original = pd.read_excel(uploaded_file)
+
+if data_source == "Google Sheets":
+    google_url = st.text_input("Вставьте ссылку на Google Sheets")
+    st.caption("Для Google Sheets должен быть открыт доступ по ссылке или таблица должна быть опубликована в интернете.")
+    if google_url:
+        try:
+            if "/edit" in google_url:
+                sheet_id = google_url.split("/d/")[1].split("/")[0]
+                csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+            else:
+                csv_url = google_url
+            df_original = pd.read_csv(csv_url)
+        except Exception as e:
+            st.error("Не удалось загрузить Google Sheets. Проверьте доступ по ссылке.")
+            st.write(e)
+
+if df_original is None:
+    st.info("Загрузите Excel-файл или вставьте ссылку на Google Sheets.")
     st.stop()
 
-# ===================== LOAD DATA =====================
-
-df_original = pd.read_excel(uploaded_file)
 df_original = df_original.dropna(how="all")
 df_original = df_original.dropna(axis=1, how="all")
 
-# ===================== COLUMN SEARCH =====================
+# =========================================================
+# COLUMN SEARCH
+# =========================================================
 
 def find_column(df, possible_names):
     for col in df.columns:
@@ -154,25 +198,28 @@ col_claim_text = find_column(df_original, ["жалоба пациента", "ж�
 col_operator_error = find_column(df_original, ["в чем ошибка оператора", "ошибка оператора"])
 col_error_reason = find_column(df_original, ["причина ошибки"])
 col_validity = find_column(df_original, ["обоснованность"])
-col_plan = find_column(df_original, ["план корректирующих", "корректирующих мероприятий"])
 col_confirmed = find_column(df_original, ["за кем подтверждена"])
 col_date = find_column(df_original, ["дата поступления жалобы", "дата составления жалобы", "дата"])
 
-# ===================== CLEANING =====================
+# =========================================================
+# CLEANING
+# =========================================================
 
 df = df_original.copy()
+
+def normalize_spaces(text):
+    return " ".join(str(text).replace("\n", " ").replace("\r", " ").split())
 
 def clean_text_value(value):
     if pd.isna(value):
         return "Не указано"
 
-    text = str(value).strip()
-    text = " ".join(text.split())
+    text = normalize_spaces(value)
 
     if text.lower() in ["nan", "none", "", "nat"]:
         return "Не указано"
 
-    lower = text.lower()
+    lower = text.lower().replace("ё", "е")
 
     dictionary = {
         "нет": "Нет",
@@ -189,11 +236,14 @@ def clean_text_value(value):
         "кц": "Контакт-центр",
         "контакт центр": "Контакт-центр",
         "контакт-центр": "Контакт-центр",
-        "клиент": "Клиент"
     }
 
     if lower in dictionary:
         return dictionary[lower]
+
+    if lower.startswith("св"):
+        number = "".join([ch for ch in lower if ch.isdigit()])
+        return f"СВ{number}" if number else text.upper()
 
     return text[0].upper() + text[1:] if len(text) > 1 else text.upper()
 
@@ -201,7 +251,7 @@ for col in df.columns:
     if df[col].dtype == "object":
         df[col] = df[col].apply(clean_text_value)
 
-# "Нет" в причине ошибки = ошибки нет
+# Analytical error columns:
 if col_error_reason:
     df["_Причина_ошибки_аналитическая"] = df[col_error_reason].apply(
         lambda x: "Ошибки нет" if clean_text_value(x) == "Нет" else clean_text_value(x)
@@ -216,29 +266,36 @@ if col_operator_error:
 else:
     df["_Ошибка_оператора_аналитическая"] = "Не указано"
 
-# ===================== DATE =====================
+# =========================================================
+# DATE FEATURES
+# =========================================================
 
 if col_date and col_date in df.columns:
     df["_Дата"] = pd.to_datetime(df[col_date], errors="coerce", dayfirst=True)
-    df["_День"] = df["_Дата"].dt.day.fillna("Не указано").astype(str)
-    df["_Месяц_номер"] = df["_Дата"].dt.month
+    df["_День"] = df["_Дата"].dt.strftime("%d.%m").fillna("Не указано")
+    df["_Неделя"] = df["_Дата"].dt.isocalendar().week.astype(str)
 else:
     df["_Дата"] = pd.NaT
     df["_День"] = "Не указано"
-    df["_Месяц_номер"] = None
+    df["_Неделя"] = "Не указано"
+
+if col_week and col_week in df.columns:
+    df["_Неделя"] = df[col_week].astype(str).apply(clean_text_value)
 
 if col_month and col_month in df.columns:
     df["_Месяц"] = df[col_month].astype(str).apply(clean_text_value)
 else:
-    df["_Месяц"] = df["_Месяц_номер"].astype(str)
+    df["_Месяц"] = df["_Дата"].dt.strftime("%m").fillna("Не указано")
 
-# ===================== CASCADING FILTERS =====================
+# =========================================================
+# CASCADING FILTERS
+# =========================================================
 
 st.sidebar.markdown("## Фильтры анализа")
 
 if st.sidebar.button("Сбросить фильтры"):
     for key in list(st.session_state.keys()):
-        if key.startswith("f_"):
+        if key.startswith("f_") or key == "operator_search":
             del st.session_state[key]
     st.rerun()
 
@@ -268,9 +325,20 @@ def cascading_filter(label, column, key):
 
 cascading_filter("СВ", col_sv, "f_sv")
 cascading_filter("Месяц", "_Месяц", "f_month")
+cascading_filter("Неделя", "_Неделя", "f_week")
 cascading_filter("День", "_День", "f_day")
 cascading_filter("Город", col_city, "f_city")
 cascading_filter("Агломерация", col_region, "f_region")
+
+operator_search = st.sidebar.text_input("Поиск оператора", key="operator_search")
+
+if col_operator and operator_search:
+    df_filtered = df_filtered[
+        df_filtered[col_operator]
+        .astype(str)
+        .str.contains(operator_search, case=False, na=False)
+    ]
+
 cascading_filter("Оператор", col_operator, "f_operator")
 cascading_filter("Тематика жалобы", col_claim_topic, "f_claim_topic")
 cascading_filter("Обоснованность", col_validity, "f_validity")
@@ -281,7 +349,9 @@ if len(df) == 0:
     st.warning("По выбранным фильтрам данных нет. Измените фильтры или нажмите «Сбросить фильтры».")
     st.stop()
 
-# ===================== KPI =====================
+# =========================================================
+# KPI
+# =========================================================
 
 st.markdown("## Dashboard руководителя")
 
@@ -308,7 +378,9 @@ k5.metric("Тем жалоб", df[col_claim_topic].nunique() if col_claim_topic 
 k6.metric("Обоснованных", f"{valid_share:.1f}%")
 k7.metric("Необоснованных", f"{invalid_share:.1f}%")
 
-# ===================== QUALITY AND RISK INDEXES =====================
+# =========================================================
+# OPERATOR RISK AND QUALITY INDEX
+# =========================================================
 
 operator_stats = None
 risk_index = 0
@@ -362,7 +434,38 @@ q1.metric("Индекс качества операторов", f"{quality_index
 q2.metric("Индекс риска", f"{risk_index:.1f}/100")
 q3.metric("Уровень управленческого риска", "Высокий" if risk_index >= 70 else "Средний" if risk_index >= 40 else "Низкий")
 
-# ===================== EXECUTIVE DASHBOARD =====================
+with st.expander("Методика расчета индексов"):
+    st.markdown("""
+### Индекс риска оператора
+
+```text
+Индекс риска =
+(количество претензий оператора / максимум претензий среди операторов × 35)
++ (доля обоснованных претензий × 0.4)
++ (подтвержденные ошибки / максимум претензий среди операторов × 25)
+```
+
+### Индекс качества оператора
+
+```text
+Индекс качества = 100 - Индекс риска
+```
+
+### Уровень управленческого риска
+
+```text
+0–39   — низкий риск
+40–69  — средний риск
+70–100 — высокий риск
+```
+
+Методика используется для приоритизации операторов, требующих дополнительного контроля,
+аудита звонков или адресного обучения.
+""")
+
+# =========================================================
+# EXECUTIVE DASHBOARD
+# =========================================================
 
 st.markdown("## Executive Dashboard")
 
@@ -411,7 +514,25 @@ with d3:
 with st.expander("Исходные данные после фильтрации"):
     st.dataframe(df, width="stretch")
 
-# ===================== VISUAL FUNCTIONS =====================
+with st.expander("Сопоставление найденных столбцов"):
+    st.write({
+        "Год": col_year,
+        "Месяц": col_month,
+        "Неделя": col_week,
+        "СВ": col_sv,
+        "Город": col_city,
+        "Агломерация": col_region,
+        "Оператор": col_operator,
+        "Тематика жалобы": col_claim_topic,
+        "Ошибка оператора": col_operator_error,
+        "Причина ошибки": col_error_reason,
+        "Обоснованность": col_validity,
+        "Дата": col_date
+    })
+
+# =========================================================
+# VISUAL FUNCTIONS
+# =========================================================
 
 def shorten_text(text, max_len=35):
     text = str(text)
@@ -510,7 +631,9 @@ def show_heatmap(title, row_col, col_col, top_rows=15, top_cols=15, exclude_no=F
 
     return matrix
 
-# ===================== TABS =====================
+# =========================================================
+# TABS
+# =========================================================
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Основная аналитика",
@@ -527,6 +650,7 @@ with tab1:
     top_error_reasons = show_top("Топ причин подтвержденных ошибок", "_Причина_ошибки_аналитическая", exclude_no=True)
     top_validity = show_top("Обоснованность жалоб", col_validity)
     top_sv = show_top("Анализ по СВ", col_sv)
+    top_week = show_top("Анализ по неделям", "_Неделя")
     top_month = show_top("Анализ по месяцам", "_Месяц")
     top_day = show_top("Анализ по дням", "_День")
 
@@ -630,7 +754,9 @@ with tab4:
             width="stretch"
         )
 
-# ===================== RECOMMENDATIONS =====================
+# =========================================================
+# RECOMMENDATIONS
+# =========================================================
 
 recommendations = []
 
@@ -666,6 +792,10 @@ elif risk_index >= 40:
 else:
     recommendations.append("Индекс риска низкий. Рекомендуется поддерживать текущий контроль качества и мониторинг динамики.")
 
+# =========================================================
+# GENERATIVE ANALYTICS
+# =========================================================
+
 with tab5:
     st.markdown("### Генеративная аналитика")
 
@@ -676,6 +806,7 @@ with tab5:
             st.warning("Введите вопрос.")
         else:
             top_operator_text = ""
+
             if operator_stats is not None and len(operator_stats) > 0:
                 top_operator = operator_stats.index[0]
                 top_operator_row = operator_stats.iloc[0]
@@ -719,7 +850,9 @@ with tab5:
 5. Через 2–4 недели повторно измерить индекс риска и индекс качества операторов.
 """)
 
-# ===================== EXPORT =====================
+# =========================================================
+# EXPORT
+# =========================================================
 
 st.markdown("## Экспорт результатов")
 
@@ -743,6 +876,59 @@ st.download_button(
     data=report_text,
     file_name="contact_center_quality_report.txt",
     mime="text/plain"
+)
+
+html_report = f"""
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+body {{
+    font-family: Arial, sans-serif;
+    color: #1F2D3D;
+    padding: 30px;
+}}
+h1, h2 {{
+    color: #005B8F;
+}}
+.card {{
+    background: #E4F5F8;
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}}
+</style>
+</head>
+<body>
+<h1>Управленческий отчет по анализу претензионной деятельности контакт-центра</h1>
+
+<div class="card">
+<p><b>Дата формирования:</b> {datetime.now().strftime("%d.%m.%Y %H:%M")}</p>
+<p><b>Всего претензий:</b> {total_claims}</p>
+<p><b>Доля обоснованных жалоб:</b> {valid_share:.1f}%</p>
+<p><b>Доля необоснованных жалоб:</b> {invalid_share:.1f}%</p>
+<p><b>Индекс качества операторов:</b> {quality_index:.1f}/100</p>
+<p><b>Индекс риска:</b> {risk_index:.1f}/100</p>
+</div>
+
+<h2>Управленческие рекомендации</h2>
+<ul>
+{''.join(f'<li>{r}</li>' for r in recommendations)}
+</ul>
+
+<h2>Методика расчета</h2>
+<p><b>Индекс риска</b> учитывает количество претензий, долю обоснованных жалоб и подтвержденные ошибки.</p>
+<p><b>Индекс качества оператора</b> = 100 - индекс риска.</p>
+
+</body>
+</html>
+"""
+
+st.download_button(
+    "Скачать HTML-отчет",
+    data=html_report,
+    file_name="contact_center_quality_report.html",
+    mime="text/html"
 )
 
 excel_buffer = BytesIO()
