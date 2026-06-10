@@ -4,15 +4,11 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 from datetime import datetime
 
-try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet
-    REPORTLAB_AVAILABLE = True
-except Exception:
-    REPORTLAB_AVAILABLE = False
-
-st.set_page_config(page_title="LetovaS DSS", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="Аналитическая система КЦ",
+    page_icon="📊",
+    layout="wide"
+)
 
 # ===================== DESIGN =====================
 
@@ -24,7 +20,7 @@ st.markdown("""
 }
 h1 {
     color: #0097A9 !important;
-    font-size: 52px !important;
+    font-size: 44px !important;
     font-weight: 900 !important;
 }
 h2, h3 {
@@ -33,7 +29,7 @@ h2, h3 {
 }
 .hero {
     background: linear-gradient(135deg, #FFFFFF 0%, #E1F5F8 55%, #B9E5EB 100%);
-    padding: 38px;
+    padding: 34px;
     border-radius: 30px;
     margin-bottom: 30px;
     box-shadow: 0 18px 45px rgba(0, 151, 169, 0.16);
@@ -41,7 +37,7 @@ h2, h3 {
 }
 .hero-subtitle {
     color: #005B8F;
-    font-size: 24px;
+    font-size: 23px;
     font-weight: 700;
 }
 .hero-text {
@@ -71,16 +67,8 @@ h2, h3 {
     color: #0097A9;
     font-weight: 900;
 }
-.stButton > button {
+.stButton > button, .stDownloadButton > button {
     background: linear-gradient(90deg, #0097A9, #00B8C8);
-    color: white;
-    border-radius: 14px;
-    padding: 10px 24px;
-    border: none;
-    font-weight: 800;
-}
-.stDownloadButton > button {
-    background: linear-gradient(90deg, #005B8F, #0097A9);
     color: white;
     border-radius: 14px;
     padding: 10px 24px;
@@ -115,20 +103,22 @@ h2, h3 {
 
 st.markdown("""
 <div class="hero">
-    <h1>LetovaS DSS</h1>
+    <h1>Интеллектуальная аналитическая система контроля качества контакт-центра</h1>
     <div class="hero-subtitle">
-        Интеллектуальная система поддержки управленческих решений
+        Система поддержки управленческих решений для анализа претензионной деятельности
     </div>
     <p class="hero-text">
-        Аналитическая платформа для мониторинга претензионной деятельности,
-        оценки качества обслуживания, выявления ошибок операторов,
-        прогнозирования нагрузки, риск-анализа и формирования управленческих рекомендаций
-        для контакт-центра медицинской сети.
+        Платформа выполняет анализ претензий пациентов, выявляет проблемные зоны,
+        оценивает качество работы операторов, рассчитывает риск-индексы и формирует
+        управленческие рекомендации для повышения эффективности обслуживания.
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Загрузите Excel-файл с претензиями", type=["xlsx", "xls"])
+uploaded_file = st.file_uploader(
+    "Загрузите Excel-файл с претензиями",
+    type=["xlsx", "xls"]
+)
 
 if uploaded_file is None:
     st.info("Загрузите Excel-файл для запуска аналитического модуля.")
@@ -139,6 +129,8 @@ if uploaded_file is None:
 df_original = pd.read_excel(uploaded_file)
 df_original = df_original.dropna(how="all")
 df_original = df_original.dropna(axis=1, how="all")
+
+# ===================== COLUMN SEARCH =====================
 
 def find_column(df, possible_names):
     for col in df.columns:
@@ -165,6 +157,8 @@ col_validity = find_column(df_original, ["обоснованность"])
 col_plan = find_column(df_original, ["план корректирующих", "корректирующих мероприятий"])
 col_confirmed = find_column(df_original, ["за кем подтверждена"])
 col_date = find_column(df_original, ["дата поступления жалобы", "дата составления жалобы", "дата"])
+
+# ===================== CLEANING =====================
 
 df = df_original.copy()
 
@@ -207,7 +201,22 @@ for col in df.columns:
     if df[col].dtype == "object":
         df[col] = df[col].apply(clean_text_value)
 
-# ===================== DATE FEATURES =====================
+# "Нет" в причине ошибки = ошибки нет
+if col_error_reason:
+    df["_Причина_ошибки_аналитическая"] = df[col_error_reason].apply(
+        lambda x: "Ошибки нет" if clean_text_value(x) == "Нет" else clean_text_value(x)
+    )
+else:
+    df["_Причина_ошибки_аналитическая"] = "Не указано"
+
+if col_operator_error:
+    df["_Ошибка_оператора_аналитическая"] = df[col_operator_error].apply(
+        lambda x: "Ошибки нет" if clean_text_value(x) == "Нет" else clean_text_value(x)
+    )
+else:
+    df["_Ошибка_оператора_аналитическая"] = "Не указано"
+
+# ===================== DATE =====================
 
 if col_date and col_date in df.columns:
     df["_Дата"] = pd.to_datetime(df[col_date], errors="coerce", dayfirst=True)
@@ -223,42 +232,54 @@ if col_month and col_month in df.columns:
 else:
     df["_Месяц"] = df["_Месяц_номер"].astype(str)
 
-# ===================== FILTERS =====================
+# ===================== CASCADING FILTERS =====================
 
 st.sidebar.markdown("## Фильтры анализа")
 
 if st.sidebar.button("Сбросить фильтры"):
-    st.session_state.clear()
+    for key in list(st.session_state.keys()):
+        if key.startswith("f_"):
+            del st.session_state[key]
     st.rerun()
 
 df_filtered = df.copy()
 
-def add_filter(label, column, key):
+def cascading_filter(label, column, key):
     global df_filtered
 
     if column is None or column not in df.columns:
         return
 
     options = sorted([
-        x for x in df[column].dropna().unique()
+        x for x in df_filtered[column].dropna().unique()
         if str(x) != "Не указано"
     ])
+
+    if key in st.session_state:
+        st.session_state[key] = [
+            x for x in st.session_state[key]
+            if x in options
+        ]
 
     selected = st.sidebar.multiselect(label, options, key=key)
 
     if selected:
         df_filtered = df_filtered[df_filtered[column].isin(selected)]
 
-add_filter("СВ", col_sv, "f_sv")
-add_filter("Месяц", "_Месяц", "f_month")
-add_filter("День", "_День", "f_day")
-add_filter("Город", col_city, "f_city")
-add_filter("Агломерация", col_region, "f_region")
-add_filter("Оператор", col_operator, "f_operator")
-add_filter("Тематика жалобы", col_claim_topic, "f_claim_topic")
-add_filter("Обоснованность", col_validity, "f_validity")
+cascading_filter("СВ", col_sv, "f_sv")
+cascading_filter("Месяц", "_Месяц", "f_month")
+cascading_filter("День", "_День", "f_day")
+cascading_filter("Город", col_city, "f_city")
+cascading_filter("Агломерация", col_region, "f_region")
+cascading_filter("Оператор", col_operator, "f_operator")
+cascading_filter("Тематика жалобы", col_claim_topic, "f_claim_topic")
+cascading_filter("Обоснованность", col_validity, "f_validity")
 
 df = df_filtered.copy()
+
+if len(df) == 0:
+    st.warning("По выбранным фильтрам данных нет. Измените фильтры или нажмите «Сбросить фильтры».")
+    st.stop()
 
 # ===================== KPI =====================
 
@@ -267,17 +288,25 @@ st.markdown("## Dashboard руководителя")
 total_claims = len(df)
 
 if col_validity and total_claims > 0:
-    valid_share = (df[col_validity] == "Обоснована").sum() / total_claims * 100
+    valid_count = (df[col_validity] == "Обоснована").sum()
+    invalid_count = (df[col_validity] == "Не обоснована").sum()
+    valid_share = valid_count / total_claims * 100
+    invalid_share = invalid_count / total_claims * 100
 else:
+    valid_count = 0
+    invalid_count = 0
     valid_share = 0
+    invalid_share = 0
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+
 k1.metric("Всего претензий", total_claims)
 k2.metric("Операторов", df[col_operator].nunique() if col_operator else "—")
 k3.metric("Городов", df[col_city].nunique() if col_city else "—")
 k4.metric("СВ", df[col_sv].nunique() if col_sv else "—")
 k5.metric("Тем жалоб", df[col_claim_topic].nunique() if col_claim_topic else "—")
 k6.metric("Обоснованных", f"{valid_share:.1f}%")
+k7.metric("Необоснованных", f"{invalid_share:.1f}%")
 
 # ===================== QUALITY AND RISK INDEXES =====================
 
@@ -286,15 +315,15 @@ risk_index = 0
 quality_index = 100
 
 if col_operator:
-    df["_Обоснована"] = 0
-    if col_validity:
-        df["_Обоснована"] = df[col_validity].apply(lambda x: 1 if x == "Обоснована" else 0)
+    df["_Обоснована"] = df[col_validity].apply(lambda x: 1 if x == "Обоснована" else 0) if col_validity else 0
+    df["_Есть_ошибка"] = df["_Ошибка_оператора_аналитическая"].apply(lambda x: 0 if x == "Ошибки нет" else 1)
 
     operator_stats = (
         df.groupby(col_operator)
         .agg(
             Количество_претензий=(col_operator, "count"),
-            Обоснованные_претензии=("_Обоснована", "sum")
+            Обоснованные_претензии=("_Обоснована", "sum"),
+            Подтвержденные_ошибки=("_Есть_ошибка", "sum")
         )
         .sort_values("Количество_претензий", ascending=False)
     )
@@ -304,12 +333,13 @@ if col_operator:
         operator_stats["Количество_претензий"] * 100
     ).round(1)
 
-    max_claims = operator_stats["Количество_претензий"].max() if len(operator_stats) > 0 else 1
+    max_claims = max(operator_stats["Количество_претензий"].max(), 1)
 
     operator_stats["Индекс_риска"] = (
-        operator_stats["Количество_претензий"] / max_claims * 50 +
-        operator_stats["Доля_обоснованных_%"] * 0.5
-    ).round(1)
+        operator_stats["Количество_претензий"] / max_claims * 35 +
+        operator_stats["Доля_обоснованных_%"] * 0.4 +
+        operator_stats["Подтвержденные_ошибки"] / max_claims * 25
+    ).clip(upper=100).round(1)
 
     operator_stats["Индекс_качества"] = (
         100 - operator_stats["Индекс_риска"]
@@ -324,8 +354,8 @@ if col_operator:
 
     operator_stats["Риск"] = operator_stats.apply(risk_level, axis=1)
 
-    risk_index = operator_stats["Индекс_риска"].mean().round(1)
-    quality_index = operator_stats["Индекс_качества"].mean().round(1)
+    risk_index = float(operator_stats["Индекс_риска"].mean().round(1))
+    quality_index = float(operator_stats["Индекс_качества"].mean().round(1))
 
 q1, q2, q3 = st.columns(3)
 q1.metric("Индекс качества операторов", f"{quality_index:.1f}/100")
@@ -338,9 +368,21 @@ st.markdown("## Executive Dashboard")
 
 d1, d2, d3 = st.columns(3)
 
-critical_text = "Доля обоснованных жалоб требует контроля." if valid_share >= 50 else "Критическая доля обоснованных жалоб не выявлена."
-risk_text = "Риск повышен из-за концентрации претензий по отдельным операторам." if risk_index >= 40 else "Риск находится на контролируемом уровне."
-action_text = "Провести адресное обучение операторов и актуализировать регламенты."
+critical_text = (
+    "Высокая доля обоснованных претензий требует управленческого вмешательства."
+    if valid_share >= 50
+    else "Критическая доля обоснованных претензий не выявлена."
+)
+
+risk_text = (
+    "Риск повышен из-за концентрации претензий и подтвержденных ошибок по отдельным операторам."
+    if risk_index >= 40
+    else "Риск находится на контролируемом уровне."
+)
+
+action_text = (
+    "Рекомендуется адресное обучение операторов, аудит звонков и корректировка скриптов коммуникации."
+)
 
 with d1:
     st.markdown(f"""
@@ -369,22 +411,6 @@ with d3:
 with st.expander("Исходные данные после фильтрации"):
     st.dataframe(df, width="stretch")
 
-with st.expander("Сопоставление найденных столбцов"):
-    st.write({
-        "Год": col_year,
-        "Месяц": col_month,
-        "Неделя": col_week,
-        "СВ": col_sv,
-        "Город": col_city,
-        "Агломерация": col_region,
-        "Оператор": col_operator,
-        "Тематика жалобы": col_claim_topic,
-        "Ошибка оператора": col_operator_error,
-        "Причина ошибки": col_error_reason,
-        "Обоснованность": col_validity,
-        "Дата": col_date
-    })
-
 # ===================== VISUAL FUNCTIONS =====================
 
 def shorten_text(text, max_len=35):
@@ -404,19 +430,23 @@ def make_unique_columns(columns):
             result.append(f"{col}_{seen[col]}")
     return result
 
-def show_top(title, column, top_n=15):
+def show_top(title, column, top_n=15, exclude_no=False):
     if column is None or column not in df.columns:
         return None
 
     st.markdown(f"### {title}")
 
-    values = (
-        df[column]
-        .fillna("Не указано")
-        .apply(clean_text_value)
-        .value_counts()
-        .head(top_n)
-    )
+    series = df[column].fillna("Не указано").apply(clean_text_value)
+
+    if exclude_no:
+        series = series[series != "Ошибки нет"]
+        series = series[series != "Нет"]
+
+    values = series.value_counts().head(top_n)
+
+    if len(values) == 0:
+        st.info("По данному блоку отсутствуют подтвержденные ошибки.")
+        return values
 
     st.dataframe(values.rename("Количество"), width="stretch")
 
@@ -430,18 +460,30 @@ def show_top(title, column, top_n=15):
 
     return values
 
-def show_heatmap(title, row_col, col_col, top_rows=15, top_cols=15):
+def show_heatmap(title, row_col, col_col, top_rows=15, top_cols=15, exclude_no=False):
     if row_col is None or col_col is None:
         return None
 
     st.markdown(f"### {title}")
 
-    top_row_values = df[row_col].value_counts().head(top_rows).index
-    top_col_values = df[col_col].value_counts().head(top_cols).index
+    work_df = df.copy()
 
-    filtered_df = df[
-        df[row_col].isin(top_row_values) &
-        df[col_col].isin(top_col_values)
+    if exclude_no:
+        work_df = work_df[
+            (work_df[col_col] != "Ошибки нет") &
+            (work_df[col_col] != "Нет")
+        ]
+
+    if len(work_df) == 0:
+        st.info("Нет данных для построения матрицы.")
+        return None
+
+    top_row_values = work_df[row_col].value_counts().head(top_rows).index
+    top_col_values = work_df[col_col].value_counts().head(top_cols).index
+
+    filtered_df = work_df[
+        work_df[row_col].isin(top_row_values) &
+        work_df[col_col].isin(top_col_values)
     ]
 
     matrix = pd.crosstab(filtered_df[row_col], filtered_df[col_col])
@@ -458,10 +500,8 @@ def show_heatmap(title, row_col, col_col, top_rows=15, top_cols=15):
 
         ax.set_xticks(range(len(matrix.columns)))
         ax.set_yticks(range(len(matrix.index)))
-
         ax.set_xticklabels(matrix.columns, rotation=35, ha="right", fontsize=8)
         ax.set_yticklabels(matrix.index, fontsize=9)
-
         ax.set_title(title, fontsize=16, color="#005B8F", fontweight="bold", pad=18)
 
         fig.colorbar(heatmap)
@@ -472,24 +512,23 @@ def show_heatmap(title, row_col, col_col, top_rows=15, top_cols=15):
 
 # ===================== TABS =====================
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Основная аналитика",
     "👥 Операторы и риски",
     "🔥 Матрицы и Heatmap",
     "📝 Текстовый анализ",
-    "📈 Прогноз нагрузки",
-    "🤖 Генеративная аналитика"
+    "🧠 Генеративная аналитика"
 ])
 
 with tab1:
     top_claim_topics = show_top("Топ тематик жалоб", col_claim_topic)
     top_consult_topics = show_top("Топ тематик консультаций", col_consult_topic)
-    top_errors = show_top("Топ ошибок операторов", col_operator_error)
-    top_error_reasons = show_top("Топ причин ошибок", col_error_reason)
+    top_errors = show_top("Топ подтвержденных ошибок операторов", "_Ошибка_оператора_аналитическая", exclude_no=True)
+    top_error_reasons = show_top("Топ причин подтвержденных ошибок", "_Причина_ошибки_аналитическая", exclude_no=True)
     top_validity = show_top("Обоснованность жалоб", col_validity)
     top_sv = show_top("Анализ по СВ", col_sv)
-    top_month = show_top("Динамика по месяцам", "_Месяц")
-    top_day = show_top("Распределение по дням", "_День")
+    top_month = show_top("Анализ по месяцам", "_Месяц")
+    top_day = show_top("Анализ по дням", "_День")
 
 with tab2:
     st.markdown("### Рейтинг операторов по качеству и риску")
@@ -508,6 +547,7 @@ with tab2:
                 <div class="risk-high">
                 <b>{name}</b><br>
                 Претензий: {row['Количество_претензий']}<br>
+                Подтвержденные ошибки: {row['Подтвержденные_ошибки']}<br>
                 Доля обоснованных: {row['Доля_обоснованных_%']}%<br>
                 Индекс риска: {row['Индекс_риска']}<br>
                 Индекс качества: {row['Индекс_качества']}
@@ -524,6 +564,7 @@ with tab2:
                 <div class="risk-medium">
                 <b>{name}</b><br>
                 Претензий: {row['Количество_претензий']}<br>
+                Подтвержденные ошибки: {row['Подтвержденные_ошибки']}<br>
                 Индекс риска: {row['Индекс_риска']}
                 </div>
                 """, unsafe_allow_html=True)
@@ -531,9 +572,9 @@ with tab2:
             st.success("Операторов среднего риска не выявлено.")
 
 with tab3:
-    matrix_operator_error = show_heatmap("Heatmap: оператор × ошибка", col_operator, col_operator_error)
-    matrix_sv_error = show_heatmap("Heatmap: СВ × ошибка", col_sv, col_operator_error, top_rows=10)
-    matrix_topic_reason = show_heatmap("Heatmap: тематика жалобы × причина ошибки", col_claim_topic, col_error_reason)
+    show_heatmap("Heatmap: оператор × подтвержденная ошибка", col_operator, "_Ошибка_оператора_аналитическая", exclude_no=True)
+    show_heatmap("Heatmap: СВ × подтвержденная ошибка", col_sv, "_Ошибка_оператора_аналитическая", top_rows=10, exclude_no=True)
+    show_heatmap("Heatmap: тематика жалобы × причина ошибки", col_claim_topic, "_Причина_ошибки_аналитическая", exclude_no=True)
 
 with tab4:
     st.markdown("### Текстовый анализ жалоб")
@@ -557,6 +598,9 @@ with tab4:
             score = row["Количество проблемных слов"]
             if col_validity and row.get(col_validity) == "Обоснована":
                 score += 2
+            if row["_Ошибка_оператора_аналитическая"] != "Ошибки нет":
+                score += 1
+
             if score >= 4:
                 return "Высокий"
             elif score >= 2:
@@ -575,7 +619,7 @@ with tab4:
         cols_to_show = [
             c for c in [
                 col_sv, col_operator, col_city, col_claim_topic,
-                col_operator_error, col_claim_text,
+                "_Ошибка_оператора_аналитическая", col_claim_text,
                 "Количество проблемных слов", "Приоритет жалобы"
             ]
             if c is not None and c in df.columns
@@ -586,85 +630,44 @@ with tab4:
             width="stretch"
         )
 
-with tab5:
-    st.markdown("### Прогноз нагрузки по претензиям")
-
-    forecast_text = "Недостаточно данных для прогноза."
-
-    if "_Дата" in df.columns and df["_Дата"].notna().sum() > 0:
-        daily = df.dropna(subset=["_Дата"]).groupby(df["_Дата"].dt.date).size()
-        daily.index = pd.to_datetime(daily.index)
-
-        st.dataframe(daily.rename("Количество претензий"), width="stretch")
-
-        if len(daily) >= 2:
-            avg_daily = daily.tail(7).mean()
-            forecast_next = round(avg_daily, 1)
-
-            forecast_text = f"Прогноз количества претензий на следующий день: {forecast_next}"
-
-            st.metric("Прогноз на следующий день", forecast_next)
-
-            fig, ax = plt.subplots(figsize=(11, 5))
-            daily.plot(ax=ax, marker="o", color="#0097A9")
-            ax.axhline(avg_daily, linestyle="--", color="#005B8F", label="Среднее последних дней")
-            ax.set_title("Динамика поступления претензий", color="#005B8F", fontweight="bold")
-            ax.set_xlabel("Дата")
-            ax.set_ylabel("Количество")
-            ax.legend()
-            plt.tight_layout()
-            st.pyplot(fig)
-        else:
-            st.warning("Для прогноза нужна минимум 2 даты.")
-    else:
-        st.warning("Не удалось определить дату для построения прогноза.")
-
 # ===================== RECOMMENDATIONS =====================
 
 recommendations = []
 
 if "top_claim_topics" in locals() and top_claim_topics is not None and len(top_claim_topics) > 0:
     recommendations.append(
-        f"Основная тематика жалоб — «{top_claim_topics.index[0]}». Требуется разбор процесса и проверка скриптов."
+        f"Основная тематика жалоб — «{top_claim_topics.index[0]}». Требуется детальный разбор процесса по этой тематике."
     )
 
 if "top_errors" in locals() and top_errors is not None and len(top_errors) > 0:
     recommendations.append(
-        f"Наиболее частая ошибка оператора — «{top_errors.index[0]}». Необходимо обновить чек-листы и провести обучение."
+        f"Наиболее частая подтвержденная ошибка — «{top_errors.index[0]}». Рекомендуется обновить чек-листы и провести адресное обучение."
     )
 
 if "top_error_reasons" in locals() and top_error_reasons is not None and len(top_error_reasons) > 0:
     recommendations.append(
-        f"Основная причина ошибки — «{top_error_reasons.index[0]}». Следует уточнить регламенты и инструкции."
+        f"Ключевая причина подтвержденных ошибок — «{top_error_reasons.index[0]}». Следует уточнить регламенты и сценарии коммуникации."
     )
 
 if valid_share > 50:
     recommendations.append(
-        f"Доля обоснованных жалоб составляет {valid_share:.1f}%. Нужны системные корректирующие мероприятия."
+        f"Доля обоснованных жалоб составляет {valid_share:.1f}%. Необходимы системные корректирующие мероприятия."
+    )
+
+if invalid_share > 40:
+    recommendations.append(
+        f"Доля необоснованных жалоб составляет {invalid_share:.1f}%. Рекомендуется улучшить информирование пациентов о правилах и ограничениях сервиса."
     )
 
 if risk_index >= 70:
-    recommendations.append(
-        "Индекс риска высокий. Необходимо срочно провести аудит качества работы операторов."
-    )
+    recommendations.append("Индекс риска высокий. Требуется срочный аудит качества работы операторов.")
 elif risk_index >= 40:
-    recommendations.append(
-        "Индекс риска средний. Рекомендуется адресное обучение операторов из группы риска."
-    )
+    recommendations.append("Индекс риска средний. Рекомендуется адресное обучение операторов группы риска.")
+else:
+    recommendations.append("Индекс риска низкий. Рекомендуется поддерживать текущий контроль качества и мониторинг динамики.")
 
-with tab6:
-    st.markdown("### Автоматические управленческие рекомендации")
-
-    for rec in recommendations:
-        st.warning(rec)
-
+with tab5:
     st.markdown("### Генеративная аналитика")
-
-    st.info(
-        "В облачной версии генеративный модуль работает в безопасном режиме без Ollama. "
-        "Для полноценного ИИ в облаке можно подключить OpenAI API. "
-        "Локально Ollama может использоваться на вашем Mac."
-    )
 
     question = st.text_area("Введите управленческий вопрос", height=120)
 
@@ -672,89 +675,83 @@ with tab6:
         if not question.strip():
             st.warning("Введите вопрос.")
         else:
+            top_operator_text = ""
+            if operator_stats is not None and len(operator_stats) > 0:
+                top_operator = operator_stats.index[0]
+                top_operator_row = operator_stats.iloc[0]
+                top_operator_text = (
+                    f"Наибольшая концентрация претензий связана с оператором «{top_operator}»: "
+                    f"{top_operator_row['Количество_претензий']} претензий, "
+                    f"{top_operator_row['Подтвержденные_ошибки']} подтвержденных ошибок, "
+                    f"индекс риска {top_operator_row['Индекс_риска']}."
+                )
+
             st.success("Экспертный вывод:")
-            st.write(
-                f"""
-                **Краткий вывод.**  
-                Система выявила {total_claims} претензий, долю обоснованных жалоб {valid_share:.1f}%,
-                индекс качества операторов {quality_index:.1f}/100 и индекс риска {risk_index:.1f}/100.
 
-                **Основные причины.**  
-                {recommendations[0] if len(recommendations) > 0 else "Основные причины требуют дополнительного анализа."}
+            st.write(f"""
+**1. Краткий управленческий вывод**
 
-                **Риски.**  
-                Основные риски связаны с концентрацией претензий по отдельным операторам,
-                повторяющимися ошибками и обоснованными жалобами.
+По выбранной выборке проанализировано **{total_claims} претензий**.  
+Доля обоснованных претензий составляет **{valid_share:.1f}%**, доля необоснованных — **{invalid_share:.1f}%**.  
+Индекс качества операторов — **{quality_index:.1f}/100**, индекс риска — **{risk_index:.1f}/100**.
 
-                **Управленческие рекомендации.**  
-                {chr(10).join("- " + r for r in recommendations) if recommendations else "Рекомендуется провести дополнительный аудит данных."}
+**2. Основные проблемные зоны**
 
-                **План корректирующих мероприятий.**  
-                1. Провести выборочный аудит звонков.  
-                2. Обновить чек-листы контроля качества.  
-                3. Назначить адресное обучение операторов группы риска.  
-                4. Отслеживать динамику жалоб после корректирующих мероприятий.  
-                """
-            )
+{recommendations[0] if len(recommendations) > 0 else "Проблемные зоны требуют дополнительного анализа."}
 
-# ===================== REPORTS =====================
+{top_operator_text}
+
+**3. Интерпретация для руководителя**
+
+Если претензии обоснованы и сопровождаются подтвержденными ошибками операторов, проблема связана не только с восприятием пациента, но и с нарушением процесса обслуживания.  
+Если преобладают необоснованные претензии, основной управленческий акцент должен быть направлен на информирование пациентов, корректность ожиданий и прозрачность регламентов.
+
+**4. Рекомендации**
+
+{chr(10).join("- " + r for r in recommendations)}
+
+**5. План корректирующих мероприятий**
+
+1. Провести выборочный аудит звонков по основным тематикам жалоб.  
+2. Сформировать список операторов группы риска.  
+3. Провести адресное обучение по частым подтвержденным ошибкам.  
+4. Обновить чек-листы качества и скрипты коммуникации.  
+5. Через 2–4 недели повторно измерить индекс риска и индекс качества операторов.
+""")
+
+# ===================== EXPORT =====================
 
 st.markdown("## Экспорт результатов")
 
 report_text = f"""
-ОТЧЕТ LETOVAS DSS
+ОТЧЕТ ПО АНАЛИЗУ ПРЕТЕНЗИОННОЙ ДЕЯТЕЛЬНОСТИ КОНТАКТ-ЦЕНТРА
 
 Дата формирования: {datetime.now().strftime("%d.%m.%Y %H:%M")}
 
 Всего претензий: {total_claims}
 Доля обоснованных жалоб: {valid_share:.1f}%
+Доля необоснованных жалоб: {invalid_share:.1f}%
 Индекс качества операторов: {quality_index:.1f}/100
 Индекс риска: {risk_index:.1f}/100
-
-Прогноз:
-{forecast_text if 'forecast_text' in locals() else "Нет данных"}
 
 Управленческие рекомендации:
 {chr(10).join("- " + r for r in recommendations) if recommendations else "Нет данных"}
 """
 
 st.download_button(
-    "Скачать управленческий TXT-отчет",
+    "Скачать управленческий отчет TXT",
     data=report_text,
-    file_name="LetovaS_DSS_report.txt",
+    file_name="contact_center_quality_report.txt",
     mime="text/plain"
 )
-
-if REPORTLAB_AVAILABLE:
-    pdf_buffer = BytesIO()
-    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
-    styles = getSampleStyleSheet()
-    story = []
-
-    for line in report_text.split("\n"):
-        if line.strip():
-            story.append(Paragraph(line, styles["Normal"]))
-            story.append(Spacer(1, 8))
-
-    doc.build(story)
-    pdf_buffer.seek(0)
-
-    st.download_button(
-        "Скачать PDF Executive Report",
-        data=pdf_buffer,
-        file_name="LetovaS_DSS_Executive_Report.pdf",
-        mime="application/pdf"
-    )
-else:
-    st.warning("PDF-отчет недоступен. Добавьте reportlab в requirements.txt.")
 
 excel_buffer = BytesIO()
 df.to_excel(excel_buffer, index=False, engine="openpyxl")
 excel_buffer.seek(0)
 
 st.download_button(
-    "Скачать очищенные данные",
+    "Скачать очищенные данные Excel",
     data=excel_buffer,
-    file_name="LetovaS_DSS_cleaned_data.xlsx",
+    file_name="cleaned_contact_center_data.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
