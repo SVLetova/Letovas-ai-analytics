@@ -601,6 +601,113 @@ with tab5:
 4. Обновить чек-листы качества и скрипты коммуникации.  
 5. Через 2–4 недели повторно измерить индекс риска и индекс качества операторов.
 """)
+st.markdown("### Чат-аналитик по данным")
+
+st.caption(
+    "Задайте вопрос по загруженной таблице. Например: "
+    "«Сколько обоснованных жалоб по СВ5?» или "
+    "«Топ ошибок операторов»."
+)
+
+user_query = st.text_input("Введите аналитический вопрос")
+
+def answer_query(query):
+    q = query.lower()
+
+    result = df.copy()
+
+    # фильтр по СВ
+    if col_sv:
+        sv_matches = result[col_sv].dropna().unique()
+        for sv in sv_matches:
+            if str(sv).lower() in q:
+                result = result[result[col_sv] == sv]
+
+    # фильтр по оператору
+    if col_operator:
+        operators = result[col_operator].dropna().unique()
+        for op in operators:
+            if str(op).lower() in q:
+                result = result[result[col_operator] == op]
+
+    # фильтр по городу
+    if col_city:
+        cities = result[col_city].dropna().unique()
+        for city in cities:
+            if str(city).lower() in q:
+                result = result[result[col_city] == city]
+
+    # обоснованные
+    if "обоснован" in q and "необосн" not in q and "не обосн" not in q:
+        if col_validity:
+            result = result[result[col_validity] == "Обоснована"]
+
+    # необоснованные
+    if "необосн" in q or "не обосн" in q:
+        if col_validity:
+            result = result[result[col_validity] == "Не обоснована"]
+
+    # количество жалоб
+    if "сколько" in q or "количество" in q:
+        return f"Количество найденных претензий: {len(result)}"
+
+    # доля обоснованных
+    if "доля" in q and "обосн" in q:
+        if col_validity and len(result) > 0:
+            share = (result[col_validity] == "Обоснована").sum() / len(result) * 100
+            return f"Доля обоснованных претензий: {share:.1f}%"
+        return "Недостаточно данных для расчета доли."
+
+    # топ ошибок
+    if "топ" in q and ("ошиб" in q or "ошибка" in q):
+        if "_Ошибка_оператора_аналитическая" in result.columns:
+            top = (
+                result["_Ошибка_оператора_аналитическая"]
+                .replace("Ошибки нет", pd.NA)
+                .dropna()
+                .value_counts()
+                .head(5)
+            )
+            if len(top) == 0:
+                return "Подтвержденные ошибки не найдены."
+            return "Топ ошибок:\n" + "\n".join(
+                [f"{i+1}. {idx}: {val}" for i, (idx, val) in enumerate(top.items())]
+            )
+
+    # топ причин
+    if "топ" in q and "причин" in q:
+        if "_Причина_ошибки_аналитическая" in result.columns:
+            top = (
+                result["_Причина_ошибки_аналитическая"]
+                .replace("Ошибки нет", pd.NA)
+                .dropna()
+                .value_counts()
+                .head(5)
+            )
+            if len(top) == 0:
+                return "Подтвержденные причины ошибок не найдены."
+            return "Топ причин ошибок:\n" + "\n".join(
+                [f"{i+1}. {idx}: {val}" for i, (idx, val) in enumerate(top.items())]
+            )
+
+    # топ операторов
+    if "топ" in q and "оператор" in q:
+        if col_operator:
+            top = result[col_operator].value_counts().head(5)
+            return "Топ операторов по количеству претензий:\n" + "\n".join(
+                [f"{i+1}. {idx}: {val}" for i, (idx, val) in enumerate(top.items())]
+            )
+
+    return (
+        "Я пока могу отвечать на вопросы о количестве претензий, доле обоснованных, "
+        "топе ошибок, топе причин, операторах, СВ и городах. "
+        "Попробуйте сформулировать вопрос проще."
+    )
+
+if user_query:
+    answer = answer_query(user_query)
+    st.success("Ответ аналитического модуля:")
+    st.write(answer)           
 
 st.markdown("## Экспорт результатов")
 
